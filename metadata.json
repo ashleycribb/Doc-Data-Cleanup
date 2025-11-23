@@ -1,0 +1,5 @@
+{
+  "name": "Doc Data Cleanup Agent",
+  "description": "An intelligent agent that uses Gemini to inspect, convert, and clean uploaded data files, preparing them for analysis or storage.",
+  "requestFramePermissions": []
+}

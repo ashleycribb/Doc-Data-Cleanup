@@ -1,0 +1,66 @@
+
+
+
+import React from 'react';
+import type { AnalysisSuggestion } from '../types';
+import { SpinnerIcon } from './icons/SpinnerIcon';
+import { LightbulbIcon } from './icons/LightbulbIcon';
+
+interface AnalysisSuggestionsProps {
+    onSuggest: () => void;
+    suggestions: AnalysisSuggestion[];
+    isLoading: boolean;
+}
+
+export const AnalysisSuggestions: React.FC<AnalysisSuggestionsProps> = ({ onSuggest, suggestions, isLoading }) => {
+    const hasSuggestions = suggestions.length > 0;
+
+    return (
+        <div className="bg-brand-gray-800/50 p-6 rounded-xl shadow-lg flex flex-col">
+            <h2 className="text-xl font-semibold text-brand-gray-100 mb-4">4. Analysis &amp; Insights</h2>
+            
+            {!hasSuggestions && !isLoading && (
+                 <div className="text-center py-4">
+                    <p className="text-brand-gray-400 mb-4">Let Gemini suggest relevant statistical analyses for your cleaned data.</p>
+                    <button
+                        onClick={onSuggest}
+                        disabled={isLoading}
+                        className="inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-brand-gray-600 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 focus:ring-offset-brand-gray-900 transition-colors"
+                    >
+                         <LightbulbIcon className="w-5 h-5 mr-2" />
+                        Suggest Analyses
+                    </button>
+                 </div>
+            )}
+
+            {isLoading && (
+                <div className="flex items-center justify-center py-10">
+                    <SpinnerIcon className="w-10 h-10 text-brand-blue-light" />
+                    <p className="ml-4 text-brand-gray-300">Gemini is analyzing your data schema...</p>
+                </div>
+            )}
+
+            {hasSuggestions && (
+                <div className="space-y-4 mt-2">
+                    {suggestions.map((suggestion, index) => (
+                        <div key={index} className="bg-brand-gray-900/70 p-4 rounded-lg border border-brand-gray-700">
+                            <div className="flex items-center justify-between">
+                                <h3 className="font-semibold text-lg text-brand-blue-light">{suggestion.name}</h3>
+                                <span className="text-xs font-medium bg-brand-gray-700 text-brand-gray-300 px-2 py-1 rounded-full">{suggestion.type}</span>
+                            </div>
+                            <p className="mt-2 text-sm text-brand-gray-300">{suggestion.description}</p>
+                        </div>
+                    ))}
+                     <button
+                        onClick={onSuggest}
+                        disabled={isLoading}
+                        className="w-full mt-4 inline-flex items-center justify-center px-4 py-2 border border-brand-gray-600 text-sm font-medium rounded-md shadow-sm text-brand-gray-200 bg-brand-gray-700 hover:bg-brand-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-gray-500 focus:ring-offset-brand-gray-900 transition-colors"
+                    >
+                         {isLoading ? <SpinnerIcon className="w-5 h-5 mr-2" /> : <LightbulbIcon className="w-5 h-5 mr-2" />}
+                         {isLoading ? 'Regenerating...' : 'Regenerate Suggestions'}
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+};
