@@ -1,8 +1,4 @@
 
-
-
-
-
 import React, { useState, useCallback, useEffect } from 'react';
 import { DataSourceSelector } from '../components/DataSourceSelector';
 import { StatusTracker } from '../components/StatusTracker';
@@ -22,6 +18,7 @@ import {
 } from './services/geminiService';
 import * as DataCleaner from './services/dataCleaningService';
 import { trackEvent } from './services/analyticsService';
+import * as DriveService from './services/googleDriveService';
 import type { ProcessStep, AnalysisSuggestion, Difficulty, ChatMessage, VariableSuggestion, AnalysisResult } from '../types';
 import { ProcessStatus } from '../types';
 import { Difficulty as DifficultyEnum } from '../types';
@@ -52,6 +49,7 @@ const App: React.FC = () => {
   const [variableSuggestions, setVariableSuggestions] = useState<VariableSuggestion[]>([]);
   const [isSuggestingVariables, setIsSuggestingVariables] = useState<boolean>(false);
   const [isApplyingVariables, setIsApplyingVariables] = useState<boolean>(false);
+  const [hasOptimized, setHasOptimized] = useState<boolean>(false);
 
   // Analysis State
   const [analysisSuggestions, setAnalysisSuggestions] = useState<AnalysisSuggestion[]>([]);
@@ -68,6 +66,20 @@ const App: React.FC = () => {
   const [isHelpModalOpen, setIsHelpModalOpen] = useState<boolean>(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState<boolean>(false);
 
+  // Google Drive State
+  const [isDriveReady, setIsDriveReady] = useState<boolean>(false);
+
+  useEffect(() => {
+    const initDrive = async () => {
+        try {
+            await DriveService.initGoogleDrive();
+            setIsDriveReady(DriveService.isGoogleConfigured());
+        } catch (e) {
+            console.error("Failed to initialize Google Drive:", e);
+        }
+    };
+    initDrive();
+  }, []);
 
   // Effect to clear feedback messages after a delay
   useEffect(() => {
@@ -105,6 +117,7 @@ const App: React.FC = () => {
     setVariableSuggestions([]);
     setIsSuggestingVariables(false);
     setIsApplyingVariables(false);
+    setHasOptimized(false);
     setChatHistory([]);
     setIsChatting(false);
     setDifficulty(DifficultyEnum.MEDIUM);
@@ -114,6 +127,14 @@ const App: React.FC = () => {
 
   const handleFileChange = (selectedFile: File | null) => {
     if (selectedFile) {
+      const validTypes = ['csv', 'json', 'txt'];
+      const fileExtension = selectedFile.name.split('.').pop()?.toLowerCase();
+      
+      if (!fileExtension || !validTypes.includes(fileExtension)) {
+          setError(`Invalid file type. Supported formats are: ${validTypes.join(', ').toUpperCase()}`);
+          return;
+      }
+
       trackEvent('data_source_selected', { source: 'upload' });
       handleReset();
       setFile(selectedFile);
@@ -141,13 +162,26 @@ const App: React.FC = () => {
     updateStepStatus(0, ProcessStatus.COMPLETED, `Data source "${fileName}" loaded successfully.`);
   };
 
-  const handleDriveSelect = (driveData: string, fileName: string) => {
-      trackEvent('data_source_selected', { source: 'drive' });
-      handleReset();
-      setOriginalData(driveData);
-      const mockFile = new File([driveData], fileName, { type: "text/plain" });
-      setFile(mockFile);
-      updateStepStatus(0, ProcessStatus.COMPLETED, `Data source "${fileName}" loaded successfully.`);
+  const handleDriveSelect = async () => {
+      if (!isDriveReady) {
+          setError("Google Drive is not configured. Please add GOOGLE_CLIENT_ID and GOOGLE_API_KEY to your environment.");
+          return;
+      }
+      
+      try {
+          const { content, name } = await DriveService.pickFileFromDrive();
+          trackEvent('data_source_selected', { source: 'drive' });
+          handleReset();
+          setOriginalData(content);
+          const mockFile = new File([content], name, { type: "text/plain" });
+          setFile(mockFile);
+          updateStepStatus(0, ProcessStatus.COMPLETED, `Imported "${name}" from Google Drive.`);
+      } catch (e: any) {
+          if (e !== 'Selection cancelled') {
+              console.error(e);
+              setError(`Failed to load from Drive: ${e.message || e}`);
+          }
+      }
   };
 
   // Maps function names from Gemini to our local functions
@@ -173,11 +207,9 @@ const App: React.FC = () => {
           currentData = tool(currentData, step.args);
         } catch (e) {
           console.error(`Error executing tool: ${step.name}`, e);
-          // Re-throw the original error to preserve the specific message from the cleaning function.
           if (e instanceof Error) {
             throw e;
           }
-          // If it's not an Error object, wrap it.
           throw new Error(`An unknown error occurred during local execution of "${step.name}".`);
         }
       } else {
@@ -200,6 +232,7 @@ const App: React.FC = () => {
     setIsDone(false);
     setAnalysisSuggestions([]);
     setVariableSuggestions([]);
+    setHasOptimized(false);
     setProgressPercent(0);
 
     const initialChatMessage: ChatMessage = {
@@ -261,7 +294,7 @@ const App: React.FC = () => {
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
     const originalFilename = file?.name.split('.').slice(0, -1).join('.') || 'data';
-    link.setAttribute('download', `${originalFilename}_cleaned.csv`);
+    link.setAttribute('download', `${originalFilename}${hasOptimized ? '_optimized' : ''}_cleaned.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -270,21 +303,27 @@ const App: React.FC = () => {
 
   const handleSaveToDrive = async () => {
     if (!cleanedData) return;
-    trackEvent('data_saved_to_drive');
+    if (!isDriveReady) {
+        setError("Google Drive is not configured. Please add GOOGLE_CLIENT_ID and GOOGLE_API_KEY to your environment.");
+        return;
+    }
 
     setIsSavingToDrive(true);
     setError(null);
-    setDriveFeedback({ message: "This is a demo. Simulating save to Google Drive...", type: 'info' });
+    setDriveFeedback({ message: "Authenticating and uploading to Google Drive...", type: 'info' });
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2500));
       const originalFilename = file?.name.split('.').slice(0, -1).join('.') || 'data';
-      setDriveFeedback({ message: `File "${originalFilename}_cleaned.csv" was 'saved' successfully.`, type: 'success' });
+      const fileName = `${originalFilename}${hasOptimized ? '_optimized' : ''}_cleaned.csv`;
+      
+      await DriveService.saveFileToDrive(cleanedData, fileName);
+      
+      trackEvent('data_saved_to_drive');
+      setDriveFeedback({ message: `File "${fileName}" saved successfully to your Drive.`, type: 'success' });
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred.';
       setError(`Failed to save to Google Drive: ${errorMessage}`);
-      setDriveFeedback(null); // Clear info message on error
+      setDriveFeedback(null);
     } finally {
       setIsSavingToDrive(false);
     }
@@ -316,10 +355,10 @@ const App: React.FC = () => {
     setIsApplyingVariables(true);
     setError(null);
     try {
-      // This is now a fast, synchronous, local operation
       const updatedCsv = DataCleaner.applyVariableChangesLocally(cleanedData, suggestionsToApply);
       setCleanedData(updatedCsv);
-      setVariableSuggestions([]); // Clear suggestions after applying
+      setVariableSuggestions([]);
+      setHasOptimized(true);
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred.';
       setError(`An error occurred while applying variable changes: ${errorMessage}`);
@@ -368,7 +407,6 @@ const App: React.FC = () => {
     } catch (e) {
         const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred.';
         setError(`An error occurred while chatting with the agent: ${errorMessage}`);
-        // Optionally remove the user message if the call failed
         setChatHistory(chatHistory);
     } finally {
         setIsChatting(false);
@@ -405,6 +443,7 @@ const App: React.FC = () => {
               onStart={handleStartCleanup}
               onDownload={handleDownload}
               onReset={handleReset}
+              hasOptimized={hasOptimized}
             />
             {error && (
               <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg" role="alert">
@@ -425,6 +464,7 @@ const App: React.FC = () => {
                         onSaveToDrive={handleSaveToDrive}
                         isSavingToDrive={isSavingToDrive}
                         driveFeedback={driveFeedback}
+                        hasOptimized={hasOptimized}
                     />
                     <VariableManager
                       onSuggest={handleSuggestVariableOptimizations}
@@ -432,6 +472,7 @@ const App: React.FC = () => {
                       suggestions={variableSuggestions}
                       isSuggesting={isSuggestingVariables}
                       isApplying={isApplyingVariables}
+                      hasOptimized={hasOptimized}
                     />
                     <AnalysisSuggestions 
                         onSuggest={handleSuggestAnalysis}
@@ -464,7 +505,7 @@ const App: React.FC = () => {
             <p>This agent streamlines the process of cleaning and preparing your data for analysis. Follow these steps:</p>
             <ol className="list-decimal list-inside space-y-3 pl-2">
                 <li>
-                    <strong className="text-brand-gray-100">Provide Your Data:</strong> Use one of the three methods to load your data. You can upload a file (like CSV, JSON, TXT), paste raw text directly, or import from the Google Drive demo.
+                    <strong className="text-brand-gray-100">Provide Your Data:</strong> Use one of the three methods to load your data. You can upload a file (like CSV, JSON, TXT), paste raw text directly, or import from Google Drive.
                 </li>
                 <li>
                     <strong className="text-brand-gray-100">Set Cleaning Difficulty:</strong> Choose a level of cleaning intensity. 'Easy' performs basic tasks. 'Hard' may include advanced steps like normalization, discretization, or removing redundant columns based on correlation.
@@ -473,7 +514,7 @@ const App: React.FC = () => {
                     <strong className="text-brand-gray-100">Start Cleanup:</strong> Click the 'Start Cleanup' button. The agent will ask Gemini to create a plan, then execute it locally, showing progress in the 'Agent Status' panel.
                 </li>
                 <li>
-                    <strong className="text-brand-gray-100">Review Results:</strong> Once complete, the right-hand panel will display a summary of the cleaning actions, file details, and options to download or 'save' the cleaned file.
+                    <strong className="text-brand-gray-100">Review Results:</strong> Once complete, the right-hand panel will display a summary of the cleaning actions, file details, and options to download or save the cleaned file back to Google Drive.
                 </li>
                 <li>
                     <strong className="text-brand-gray-100">Optimize Variables:</strong> After cleaning, you can ask the agent to suggest schema optimizations, such as renaming columns or changing data types, and apply them.
@@ -496,11 +537,11 @@ const App: React.FC = () => {
                 Leveraging the power of Google's Gemini API, this tool can inspect, convert, and clean various data formats, making them ready for analysis.
             </p>
             <p>
-                This version uses an advanced plan-and-execute architecture. Gemini acts as a planner, creating a cleaning strategy that is then executed locally in the browser for maximum speed and reliability.
+                This version integrates directly with Google Drive for seamless importing and exporting of data.
             </p>
             <div className="pt-4 text-xs text-brand-gray-400">
-                <p>Version: 2.1.0 (Advanced Preprocessing)</p>
-                <p>Powered by: Google Gemini API</p>
+                <p>Version: 2.2.0 (Google Drive Integration)</p>
+                <p>Powered by: Google Gemini API & Google Drive API</p>
             </div>
         </div>
       </Modal>

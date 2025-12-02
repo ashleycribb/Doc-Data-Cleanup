@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { FileUpload } from './FileUpload';
 import { PasteData } from './PasteData';
@@ -11,7 +12,7 @@ type InputSource = 'upload' | 'paste' | 'drive';
 interface DataSourceSelectorProps {
   onFileChange: (file: File | null) => void;
   onPaste: (text: string) => void;
-  onDriveSelect: (data: string, fileName: string) => void;
+  onDriveSelect: any; // Can be a direct handler or the old signature
   disabled: boolean;
   file: File | null;
 }
@@ -32,7 +33,11 @@ export const DataSourceSelector: React.FC<DataSourceSelectorProps> = ({ onFileCh
       case 'paste':
         return <PasteData onPaste={onPaste} disabled={disabled} />;
       case 'drive':
-        return <GoogleDriveInput onDriveSelect={onDriveSelect} disabled={disabled} />;
+        return <GoogleDriveInput 
+                  onDriveSelect={() => {}} // No-op for legacy prop
+                  onSelectClick={typeof onDriveSelect === 'function' ? onDriveSelect : undefined} 
+                  disabled={disabled} 
+               />;
       default:
         return null;
     }

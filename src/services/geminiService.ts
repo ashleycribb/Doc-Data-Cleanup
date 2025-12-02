@@ -1,6 +1,4 @@
 
-
-
 import { GoogleGenAI, Type, FunctionCall } from "@google/genai";
 import type { AnalysisSuggestion, Difficulty, ChatMessage, ChatAgentResponse, AnalysisResult, VariableSuggestion } from '../types';
 import { dataCleaningTools } from './toolDeclarations';
@@ -182,13 +180,17 @@ export const suggestVariableOptimizations = async (csvContent: string): Promise<
 export const suggestAnalyses = async (csvContent: string): Promise<AnalysisSuggestion[]> => {
     const prompt = `
       You are an expert academic research assistant, similar to a consultant who helps design statistical studies.
-      Based on the column headers and the first few rows of the provided CSV data, your task is to suggest potential statistical analyses that could yield meaningful insights for academic research.
+      Based on the column headers and the first few rows of the provided CSV data, your task is to suggest potential statistical analyses that could yield meaningful insights.
 
       Instructions:
       1.  Analyze the provided data snippet to understand the variable types (e.g., categorical, numerical, date).
       2.  Suggest 3 to 4 distinct and relevant statistical analyses.
-      3.  For each suggestion, provide a name for the analysis, a description of what insights it might reveal from this specific dataset, and a general type (e.g., "Descriptive", "Inferential", "Relational").
-      4.  Ensure your suggestions are practical and commonly used in academic papers.
+      3.  For each suggestion, provide:
+          *   **name**: The name of the analysis.
+          *   **description**: What insights it might reveal.
+          *   **type**: The general category (e.g., "Descriptive", "Inferential", "Relational").
+          *   **orangeInstructions**: A concise, step-by-step guide to setting up the workflow for this analysis in "Orange Data Mining" software. Be specific about which widgets to use (e.g., "File -> Select Columns -> Scatter Plot").
+      4.  Ensure your suggestions are practical and commonly used.
       5.  Return ONLY the JSON array of suggestions.
 
       Data Snippet:
@@ -204,18 +206,22 @@ export const suggestAnalyses = async (csvContent: string): Promise<AnalysisSugge
           properties: {
             name: {
               type: Type.STRING,
-              description: "The common name of the statistical analysis (e.g., 'T-Test', 'ANOVA', 'Correlation Matrix')."
+              description: "The common name of the statistical analysis."
             },
             description: {
               type: Type.STRING,
-              description: "A brief explanation of what this analysis would uncover in the context of the provided data."
+              description: "A brief explanation of what this analysis would uncover."
             },
             type: {
               type: Type.STRING,
-              description: "The general category of the analysis (e.g., 'Descriptive', 'Inferential', 'Predictive')."
+              description: "The general category of the analysis."
+            },
+            orangeInstructions: {
+              type: Type.STRING,
+              description: "Step-by-step instructions for performing this analysis in Orange Data Mining."
             }
           },
-          required: ["name", "description", "type"]
+          required: ["name", "description", "type", "orangeInstructions"]
         }
       };
       

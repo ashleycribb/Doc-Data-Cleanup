@@ -11,6 +11,7 @@ interface VariableManagerProps {
     suggestions: VariableSuggestion[];
     isSuggesting: boolean;
     isApplying: boolean;
+    hasOptimized?: boolean;
 }
 
 const SuggestionTypeBadge: React.FC<{ type: VariableSuggestion['suggestionType'] }> = ({ type }) => {
@@ -23,7 +24,7 @@ const SuggestionTypeBadge: React.FC<{ type: VariableSuggestion['suggestionType']
     return <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${classes}`}>{type.replace('_', ' ')}</span>;
 };
 
-export const VariableManager: React.FC<VariableManagerProps> = ({ onSuggest, onApply, suggestions, isSuggesting, isApplying }) => {
+export const VariableManager: React.FC<VariableManagerProps> = ({ onSuggest, onApply, suggestions, isSuggesting, isApplying, hasOptimized = false }) => {
     const hasSuggestions = suggestions.length > 0;
     const [checkedState, setCheckedState] = useState<boolean[]>([]);
 
@@ -52,6 +53,12 @@ export const VariableManager: React.FC<VariableManagerProps> = ({ onSuggest, onA
 
             {!hasSuggestions && !isSuggesting && (
                 <div className="text-center py-4">
+                     {hasOptimized && (
+                        <div className="mb-4 p-2 bg-green-900/30 border border-green-700/50 rounded-md flex items-center justify-center text-green-300 text-sm animate-fade-in-up">
+                            <CheckCircleIcon className="w-4 h-4 mr-2" />
+                            Variables have been optimized successfully.
+                        </div>
+                    )}
                     <p className="text-brand-gray-400 mb-4">Let Gemini suggest ways to optimize your data's columns for analysis.</p>
                     <button
                         onClick={onSuggest}
@@ -114,6 +121,15 @@ export const VariableManager: React.FC<VariableManagerProps> = ({ onSuggest, onA
                     </div>
                 </div>
             )}
+             <style>{`
+                @keyframes fadeInUp {
+                  from { opacity: 0; transform: translateY(5px); }
+                  to { opacity: 1; transform: translateY(0); }
+                }
+                .animate-fade-in-up {
+                  animation: fadeInUp 0.3s ease-out forwards;
+                }
+            `}</style>
         </div>
     );
 };

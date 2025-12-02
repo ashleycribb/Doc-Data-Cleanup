@@ -1,3 +1,4 @@
+
 import React, { useCallback, useState } from 'react';
 import { UploadIcon } from './icons/UploadIcon';
 import { FileIcon } from './icons/FileIcon';
@@ -10,7 +11,7 @@ interface FileUploadProps {
 }
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
-const ALLOWED_FILE_TYPES = ['csv', 'json', 'txt', 'xls', 'xlsx'];
+const ALLOWED_FILE_TYPES = ['csv', 'json', 'txt'];
 
 export const FileUpload: React.FC<FileUploadProps> = ({ onFileChange, disabled, file }) => {
   const [isDragging, setIsDragging] = useState(false);
@@ -103,7 +104,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileChange, disabled, 
         onChange={handleFileSelect}
         onClick={() => setError(null)} // Clear error when opening file dialog
         disabled={disabled}
-        accept=".csv,.json,.txt,.xls,.xlsx"
+        accept=".csv,.json,.txt"
       />
       {error ? (
         <div className="text-center text-red-300 px-4">
@@ -123,7 +124,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileChange, disabled, 
               <p className="mt-2 text-brand-gray-200">
               <span className="font-semibold text-brand-blue-light">Click to upload</span> or drag and drop
               </p>
-              <p className="text-xs text-brand-gray-400">CSV, JSON, TXT, or Excel files (Max 5MB)</p>
+              <p className="text-xs text-brand-gray-400">CSV, JSON, or TXT files (Max 5MB)</p>
           </div>
       )}
     </div>

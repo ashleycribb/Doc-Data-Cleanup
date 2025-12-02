@@ -16,6 +16,7 @@ export interface AnalysisSuggestion {
   name: string;
   description: string;
   type: string;
+  orangeInstructions?: string;
 }
 
 export enum Difficulty {

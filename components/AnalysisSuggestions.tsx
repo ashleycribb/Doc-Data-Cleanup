@@ -1,16 +1,57 @@
 
-
-
-import React from 'react';
+import React, { useState } from 'react';
 import type { AnalysisSuggestion } from '../types';
 import { SpinnerIcon } from './icons/SpinnerIcon';
 import { LightbulbIcon } from './icons/LightbulbIcon';
+import { OrangeIcon } from './icons/OrangeIcon';
 
 interface AnalysisSuggestionsProps {
     onSuggest: () => void;
     suggestions: AnalysisSuggestion[];
     isLoading: boolean;
 }
+
+const SuggestionCard: React.FC<{ suggestion: AnalysisSuggestion }> = ({ suggestion }) => {
+    const [showInstructions, setShowInstructions] = useState(false);
+
+    return (
+        <div className="bg-brand-gray-900/70 p-4 rounded-lg border border-brand-gray-700 transition-all hover:border-brand-gray-600">
+            <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-lg text-brand-blue-light">{suggestion.name}</h3>
+                <span className="text-xs font-medium bg-brand-gray-700 text-brand-gray-300 px-2 py-1 rounded-full">{suggestion.type}</span>
+            </div>
+            <p className="mt-2 text-sm text-brand-gray-300">{suggestion.description}</p>
+            
+            {suggestion.orangeInstructions && (
+                <div className="mt-4 pt-3 border-t border-brand-gray-700/50">
+                    <button 
+                        onClick={() => setShowInstructions(!showInstructions)}
+                        className="flex items-center text-xs font-medium text-orange-400 hover:text-orange-300 transition-colors focus:outline-none"
+                    >
+                        <OrangeIcon className="w-4 h-4 mr-1.5" />
+                        {showInstructions ? 'Hide Orange Workflow' : 'Show Orange Workflow'}
+                    </button>
+                    
+                    {showInstructions && (
+                        <div className="mt-3 p-3 bg-brand-gray-800 rounded border border-brand-gray-700/50 animate-fade-in-up">
+                            <p className="text-xs text-brand-gray-400 mb-1 font-semibold uppercase tracking-wider">Instructions</p>
+                            <p className="text-sm text-brand-gray-300 font-mono leading-relaxed whitespace-pre-wrap">{suggestion.orangeInstructions}</p>
+                        </div>
+                    )}
+                </div>
+            )}
+             <style>{`
+                @keyframes fadeInUp {
+                  from { opacity: 0; transform: translateY(5px); }
+                  to { opacity: 1; transform: translateY(0); }
+                }
+                .animate-fade-in-up {
+                  animation: fadeInUp 0.2s ease-out forwards;
+                }
+            `}</style>
+        </div>
+    );
+};
 
 export const AnalysisSuggestions: React.FC<AnalysisSuggestionsProps> = ({ onSuggest, suggestions, isLoading }) => {
     const hasSuggestions = suggestions.length > 0;
@@ -43,13 +84,7 @@ export const AnalysisSuggestions: React.FC<AnalysisSuggestionsProps> = ({ onSugg
             {hasSuggestions && (
                 <div className="space-y-4 mt-2">
                     {suggestions.map((suggestion, index) => (
-                        <div key={index} className="bg-brand-gray-900/70 p-4 rounded-lg border border-brand-gray-700">
-                            <div className="flex items-center justify-between">
-                                <h3 className="font-semibold text-lg text-brand-blue-light">{suggestion.name}</h3>
-                                <span className="text-xs font-medium bg-brand-gray-700 text-brand-gray-300 px-2 py-1 rounded-full">{suggestion.type}</span>
-                            </div>
-                            <p className="mt-2 text-sm text-brand-gray-300">{suggestion.description}</p>
-                        </div>
+                        <SuggestionCard key={index} suggestion={suggestion} />
                     ))}
                      <button
                         onClick={onSuggest}

@@ -15,6 +15,7 @@ interface FileManagerProps {
   onSaveToDrive: () => void;
   isSavingToDrive: boolean;
   driveFeedback: { message: string; type: 'success' | 'info' } | null;
+  hasOptimized?: boolean;
 }
 
 const getStats = (data: string) => {
@@ -44,10 +45,11 @@ export const FileManager: React.FC<FileManagerProps> = ({
     onSaveToDrive,
     isSavingToDrive,
     driveFeedback,
+    hasOptimized = false,
 }) => {
     const originalStats = getStats(originalData);
     const cleanedStats = getStats(cleanedData);
-    const cleanedFileName = originalFile?.name.split('.').slice(0, -1).join('.') + '_cleaned.csv' || 'cleaned_data.csv';
+    const cleanedFileName = originalFile?.name.split('.').slice(0, -1).join('.') + (hasOptimized ? '_optimized' : '') + '_cleaned.csv' || 'cleaned_data.csv';
 
     return (
         <div className="bg-brand-gray-800/50 p-6 rounded-xl shadow-lg flex flex-col space-y-6">
@@ -76,10 +78,10 @@ export const FileManager: React.FC<FileManagerProps> = ({
                 <div className="bg-brand-gray-900/50 p-4 rounded-lg border border-brand-blue-light/50">
                     <h3 className="font-semibold text-brand-blue-light mb-3 flex items-center">
                         <InfoIcon className="w-5 h-5 mr-2 text-brand-blue-light"/>
-                        Cleaned File Details
+                        {hasOptimized ? 'Optimized File Details' : 'Cleaned File Details'}
                     </h3>
                     <div className="flex items-center space-x-3 text-sm">
-                        <FileIcon className="w-8 h-8 text-green-400 flex-shrink-0" />
+                        <FileIcon className={`w-8 h-8 flex-shrink-0 ${hasOptimized ? 'text-green-400' : 'text-brand-blue-light'}`} />
                         <p className="font-mono text-brand-gray-300 truncate" title={cleanedFileName}>{cleanedFileName}</p>
                     </div>
                      <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
@@ -115,7 +117,7 @@ export const FileManager: React.FC<FileManagerProps> = ({
                     className="w-full inline-flex items-center justify-center px-6 py-3 border border-brand-gray-600 text-base font-medium rounded-md shadow-sm text-brand-gray-200 bg-brand-gray-700 hover:bg-brand-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-gray-500 focus:ring-offset-brand-gray-900 transition-colors disabled:opacity-50 disabled:cursor-wait"
                 >
                     {isSavingToDrive ? <SpinnerIcon className="w-5 h-5 mr-2" /> : <GoogleDriveIcon className="w-5 h-5 mr-2" />}
-                    {isSavingToDrive ? 'Saving...' : 'Save Cleaned File to Drive'}
+                    {isSavingToDrive ? 'Saving...' : `Save ${hasOptimized ? 'Optimized ' : 'Cleaned '}File to Drive`}
                 </button>
                 {driveFeedback && (
                     <div className={`mt-3 text-center text-sm transition-opacity duration-300 ${driveFeedback.type === 'success' ? 'text-green-400' : 'text-brand-gray-400'}`}>
