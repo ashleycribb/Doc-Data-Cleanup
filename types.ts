@@ -17,6 +17,7 @@ export interface AnalysisSuggestion {
   description: string;
   type: string;
   orangeInstructions?: string;
+  stepByStepInstructions?: string[];
 }
 
 export enum Difficulty {
@@ -119,6 +120,18 @@ export interface AnomalyResult {
 
 export type AnalysisResult = StatisticsResult | CorrelationResult | SentimentResult | FrequencyResult | TopicsResult | TrendResult | AnomalyResult;
 
+export interface DataHealthScore {
+  completeness: number; // 0 to 1
+  accuracy: number;     // 0 to 1 (estimated by LLM)
+  consistency: number;  // 0 to 1
+  piiRisk: 'None' | 'Low' | 'Medium' | 'High';
+  overallScore: number; // 0 to 100
+}
+
+export interface SemanticMapping {
+  originalValue: string;
+  replacementValue: string;
+}
 
 export interface ChatMessage {
   role: 'user' | 'model';

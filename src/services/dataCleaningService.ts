@@ -1,4 +1,4 @@
-import type { VariableSuggestion } from '../types';
+import type { VariableSuggestion, SemanticMapping } from '../../types';
 
 /**
  * A robust, RFC 4180-compliant CSV parser.
@@ -340,6 +340,124 @@ export const selectFeaturesByCorrelation = (data: string[][], args: { threshold:
     });
 
     return newData;
+};
+
+export const semanticMapColumn = (data: string[][], args: { columnName: string; mappings: SemanticMapping[] }): string[][] => {
+  const [headers, ...rows] = data;
+  const colIndex = findColumnIndex(headers, args.columnName);
+
+  if (colIndex === -1) return data;
+
+  const mappingDict: Record<string, string> = {};
+  args.mappings.forEach(m => {
+    mappingDict[m.originalValue] = m.replacementValue;
+  });
+
+  const updatedRows = rows.map(row => {
+    const val = row[colIndex];
+    if (mappingDict[val]) {
+      row[colIndex] = mappingDict[val];
+    }
+    return row;
+  });
+
+  return [headers, ...updatedRows];
+};
+
+export const maskSensitivePII = (data: string[][], args: { columnName?: string }): string[][] => {
+  const [headers, ...rows] = data;
+
+  // Regexes for common PII
+  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+  const phoneRegex = /\+?\d{1,4}?[-.\s]?\(?\d{1,3}?\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9}/g;
+
+  const colIndex = args.columnName ? findColumnIndex(headers, args.columnName) : -1;
+
+  const maskValue = (val: string, index: number, header: string): string => {
+    if (!val) return val;
+
+    let newVal = val;
+
+    // 1. Column-name based aggressive masking
+    const h = header.toLowerCase();
+    const isSensitiveHeader = h.includes('name') || h.includes('email') || h.includes('phone') || h.includes('address') || h.includes('ssn') || h.includes('password');
+
+    if (isSensitiveHeader || (colIndex !== -1 && index === colIndex)) {
+       if (h.includes('email')) {
+         return newVal.replace(emailRegex, (match) => {
+           const [user, domain] = match.split('@');
+           return `${user[0]}***@${domain}`;
+         });
+       }
+       if (h.includes('phone')) {
+         return newVal.replace(phoneRegex, '***-***-****');
+       }
+       // Default mask
+       return '[MASKED]';
+    }
+
+    // 2. Pattern-based masking for other columns
+    newVal = newVal.replace(emailRegex, '***@***.***');
+    newVal = newVal.replace(phoneRegex, '***-***-****');
+
+    return newVal;
+  };
+
+  const updatedRows = rows.map(row => {
+    return row.map((cell, idx) => maskValue(cell, idx, headers[idx]));
+  });
+
+  return [headers, ...updatedRows];
+};
+
+/**
+ * Converts CSV data into Orange Data Mining's .tab format.
+ * Adds metadata rows for Type and Role.
+ */
+export const convertToOrangeTab = (data: string[][]): string => {
+  if (data.length === 0) return '';
+
+  const [headers, ...rows] = data;
+
+  // Infer types for each column
+  const types = headers.map((_, colIdx) => {
+    let isNumeric = true;
+    let hasValues = false;
+
+    // Check first 100 rows
+    for (let i = 0; i < Math.min(rows.length, 100); i++) {
+        const val = rows[i][colIdx]?.trim();
+        if (val) {
+            hasValues = true;
+            if (isNaN(Number(val))) {
+                isNumeric = false;
+                break;
+            }
+        }
+    }
+
+    if (!hasValues) return 'string';
+    return isNumeric ? 'continuous' : 'discrete';
+  });
+
+  // Infer roles (simplistic: ID columns are meta, others are features)
+  const roles = headers.map(h => {
+    const header = h.toLowerCase();
+    if (header === 'id' || header.includes('uuid') || header.includes('name') || header.includes('email')) {
+        return 'meta';
+    }
+    return ''; // Default feature
+  });
+
+  // Construct the TAB content
+  const tabRows = [
+    headers.join('\t'),
+    types.join('\t'),
+    roles.join('\t'),
+    ...rows.map(row => row.join('\t'))
+  ];
+
+  return tabRows.join('\n');
 };
 
 /**

@@ -33,9 +33,28 @@ const SuggestionCard: React.FC<{ suggestion: AnalysisSuggestion }> = ({ suggesti
                     </button>
                     
                     {showInstructions && (
-                        <div className="mt-3 p-3 bg-brand-gray-800 rounded border border-brand-gray-700/50 animate-fade-in-up">
-                            <p className="text-xs text-brand-gray-400 mb-1 font-semibold uppercase tracking-wider">Instructions</p>
-                            <p className="text-sm text-brand-gray-300 font-mono leading-relaxed whitespace-pre-wrap">{suggestion.orangeInstructions}</p>
+                        <div className="mt-3 p-4 bg-brand-gray-800 rounded border border-brand-gray-700/50 animate-fade-in-up">
+                            <p className="text-xs text-brand-gray-400 mb-3 font-semibold uppercase tracking-wider flex items-center">
+                                <OrangeIcon className="w-4 h-4 mr-1.5 text-orange-500" />
+                                Orange Analysis Workflow Guide
+                            </p>
+
+                            <div className="space-y-4">
+                                {suggestion.stepByStepInstructions?.map((step, idx) => (
+                                    <div key={idx} className="flex space-x-3">
+                                        <div className="flex-shrink-0 w-6 h-6 rounded-full bg-brand-gray-700 flex items-center justify-center text-[10px] font-bold text-brand-blue-light border border-brand-gray-600">
+                                            {idx + 1}
+                                        </div>
+                                        <p className="text-sm text-brand-gray-300 leading-relaxed pt-0.5">{step}</p>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="mt-4 pt-3 border-t border-brand-gray-700/30">
+                                <p className="text-[10px] text-brand-gray-500 italic">
+                                    Summary: {suggestion.orangeInstructions}
+                                </p>
+                            </div>
                         </div>
                     )}
                 </div>
