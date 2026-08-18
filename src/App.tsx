@@ -11,6 +11,10 @@ import { ChatAgent } from '../components/ChatAgent';
 import { LogoIcon } from '../components/icons/LogoIcon';
 import { VariableManager } from '../components/VariableManager';
 import { DataHealthAuditView } from '../components/DataHealthAuditView';
+import { PreFlightCheckView } from '../components/PreFlightCheckView';
+import { runPreFlightChecks, PreFlightIssue } from './services/preFlightCheckService';
+import { generateDataDictionary } from './services/dataDictionaryService';
+import { convertToJsonl } from './services/jsonlExportService';
 import { 
   generateCleaningPlan,
   suggestAnalyses, 
@@ -56,6 +60,7 @@ const App: React.FC = () => {
   const [isSuggestingVariables, setIsSuggestingVariables] = useState<boolean>(false);
   const [isApplyingVariables, setIsApplyingVariables] = useState<boolean>(false);
   const [hasOptimized, setHasOptimized] = useState<boolean>(false);
+  const [preFlightIssues, setPreFlightIssues] = useState<PreFlightIssue[]>([]);
 
   // Analysis State
   const [analysisSuggestions, setAnalysisSuggestions] = useState<AnalysisSuggestion[]>([]);
@@ -299,6 +304,10 @@ const App: React.FC = () => {
       const finalCsv = DataCleaner.serializeCSV(cleanedParsedData);
 
       setCleanedData(finalCsv);
+
+      const parsedCleaned = DataCleaner.parseCSV(finalCsv);
+      setPreFlightIssues(runPreFlightChecks(parsedCleaned));
+
       updateStepStatus(3, ProcessStatus.COMPLETED, 'Local data cleaning finished.');
       setProgressPercent(100);
       await new Promise(resolve => setTimeout(resolve, 300));
@@ -331,6 +340,36 @@ const App: React.FC = () => {
     link.setAttribute('href', url);
     const originalFilename = file?.name.split('.').slice(0, -1).join('.') || 'data';
     link.setAttribute('download', `${originalFilename}${hasOptimized ? '_optimized' : ''}_cleaned.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleDownloadJsonl = () => {
+    if (!cleanedData) return;
+    const jsonlData = convertToJsonl(DataCleaner.parseCSV(cleanedData));
+    const blob = new Blob([jsonlData], { type: 'application/jsonl+json;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    const originalFilename = file?.name.split('.').slice(0, -1).join('.') || 'data';
+    link.setAttribute('download', `${originalFilename}_ai_finetune.jsonl`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleDownloadDict = () => {
+    if (!cleanedData) return;
+    const dictData = generateDataDictionary(DataCleaner.parseCSV(cleanedData));
+    const blob = new Blob([dictData], { type: 'text/markdown;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    const originalFilename = file?.name.split('.').slice(0, -1).join('.') || 'data';
+    link.setAttribute('download', `${originalFilename}_data_dictionary.md`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -407,6 +446,10 @@ const App: React.FC = () => {
     try {
       const updatedCsv = DataCleaner.applyVariableChangesLocally(cleanedData, suggestionsToApply);
       setCleanedData(updatedCsv);
+
+      const parsedCleaned = DataCleaner.parseCSV(updatedCsv);
+      setPreFlightIssues(runPreFlightChecks(parsedCleaned));
+
       setVariableSuggestions([]);
       setHasOptimized(true);
     } catch (e) {
@@ -493,6 +536,8 @@ const App: React.FC = () => {
               onStart={handleStartCleanup}
               onDownload={handleDownload}
               onDownloadOrange={handleDownloadOrange}
+              onDownloadJsonl={handleDownloadJsonl}
+              onDownloadDict={handleDownloadDict}
               onReset={handleReset}
               hasOptimized={hasOptimized}
             />
@@ -506,6 +551,8 @@ const App: React.FC = () => {
 
              {/* AI Health Audit View */}
              {healthScore && <DataHealthAuditView score={healthScore} />}
+
+             {isDone && <PreFlightCheckView issues={preFlightIssues} />}
           </div>
           <div className="flex flex-col space-y-6">
             {isDone ? (

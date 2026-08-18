@@ -4,6 +4,7 @@ import type { AnalysisSuggestion } from '../types';
 import { SpinnerIcon } from './icons/SpinnerIcon';
 import { LightbulbIcon } from './icons/LightbulbIcon';
 import { OrangeIcon } from './icons/OrangeIcon';
+import { DownloadIcon } from './icons/DownloadIcon';
 
 interface AnalysisSuggestionsProps {
     onSuggest: () => void;
@@ -75,9 +76,48 @@ const SuggestionCard: React.FC<{ suggestion: AnalysisSuggestion }> = ({ suggesti
 export const AnalysisSuggestions: React.FC<AnalysisSuggestionsProps> = ({ onSuggest, suggestions, isLoading }) => {
     const hasSuggestions = suggestions.length > 0;
 
+    const handleDownloadReport = () => {
+        if (!hasSuggestions) return;
+
+        let report = "# Contextual Analysis Recommendations Report\n\n";
+        suggestions.forEach((sugg, idx) => {
+            report += `## ${idx + 1}. ${sugg.name}\n\n`;
+            report += `**Why:** ${sugg.reasoning}\n\n`;
+            if (sugg.instructions) {
+                report += `### SPSS Instructions\n${sugg.instructions}\n\n`;
+            }
+            if (sugg.orangeInstructions) {
+                report += `### Orange Data Mining Instructions\n${sugg.orangeInstructions}\n\n`;
+            }
+            report += `---\n\n`;
+        });
+
+        const blob = new Blob([report], { type: 'text/markdown;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `Analysis_Recommendations_Report.md`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
     return (
         <div className="bg-brand-gray-800/50 p-6 rounded-xl shadow-lg flex flex-col">
-            <h2 className="text-xl font-semibold text-brand-gray-100 mb-4">4. Analysis &amp; Insights</h2>
+            <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold text-brand-gray-100">4. Analysis &amp; Insights</h2>
+                {hasSuggestions && (
+                    <button
+                        onClick={handleDownloadReport}
+                        className="text-sm px-3 py-1.5 bg-brand-gray-700 text-brand-gray-300 rounded hover:bg-brand-gray-600 hover:text-white transition-colors flex items-center"
+                        title="Download Full Report"
+                    >
+                        <DownloadIcon className="w-4 h-4 mr-2" />
+                        Download Report
+                    </button>
+                )}
+            </div>
             
             {!hasSuggestions && !isLoading && (
                  <div className="text-center py-4">
