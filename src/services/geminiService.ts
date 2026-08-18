@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type, FunctionCall } from "@google/genai";
-import type { AnalysisSuggestion, Difficulty, ChatMessage, ChatAgentResponse, AnalysisResult, VariableSuggestion } from '../types';
+import type { AnalysisSuggestion, Difficulty, ChatMessage, ChatAgentResponse, AnalysisResult, VariableSuggestion, SemanticMapping, DataHealthScore } from '../../types';
 import { dataCleaningTools } from './toolDeclarations';
 
 if (!process.env.API_KEY) {
@@ -99,6 +99,100 @@ ${dataSample}
     }
 };
 
+/**
+ * Uses Gemini to generate a mapping for semantic cleaning.
+ * @param columnName The name of the column.
+ * @param instruction Specific cleaning instructions.
+ * @param sampleValues A sample of unique values from the column.
+ * @returns A promise resolving to an array of semantic mappings.
+ */
+export const getSemanticMapping = async (columnName: string, instruction: string, sampleValues: string[]): Promise<SemanticMapping[]> => {
+    const prompt = `
+      You are a data labeling agent. Your task is to clean a specific column named "${columnName}" based on this instruction: "${instruction}".
+
+      Below are some unique values from this column. Identify inconsistencies, typos, or variations that should be merged or corrected.
+
+      Values:
+      ${sampleValues.join(', ')}
+
+      Return a JSON array of objects, where each object has "originalValue" and "replacementValue".
+      Only include values that actually need to be changed. If a value is already correct, do not include it.
+    `;
+
+    const responseSchema = {
+        type: Type.ARRAY,
+        items: {
+            type: Type.OBJECT,
+            properties: {
+                originalValue: { type: Type.STRING },
+                replacementValue: { type: Type.STRING }
+            },
+            required: ["originalValue", "replacementValue"]
+        }
+    };
+
+    try {
+        const response = await ai.models.generateContent({
+            model: model,
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: responseSchema,
+            },
+        });
+        return JSON.parse(response.text) as SemanticMapping[];
+    } catch (error) {
+        console.error("Error in getSemanticMapping:", error);
+        return [];
+    }
+};
+
+/**
+ * Uses Gemini to evaluate the overall health and quality of a dataset.
+ * @param csvContent A snippet of the data.
+ * @returns A promise resolving to a DataHealthScore.
+ */
+export const evaluateDataQuality = async (csvContent: string): Promise<DataHealthScore> => {
+    const prompt = `
+      Perform a data quality audit on the following CSV snippet.
+      Assess:
+      1. Completeness: Are there many missing values?
+      2. Accuracy: Do values seem plausible for their inferred types?
+      3. Consistency: Are there variants of the same categories?
+      4. PII Risk: Does the data contain names, emails, phones, or addresses? (Return 'None', 'Low', 'Medium', or 'High')
+
+      Data:
+      ${csvContent.split('\n').slice(0, 15).join('\n')}
+    `;
+
+    const responseSchema = {
+        type: Type.OBJECT,
+        properties: {
+            completeness: { type: Type.NUMBER, description: "Ratio from 0 to 1" },
+            accuracy: { type: Type.NUMBER, description: "Ratio from 0 to 1" },
+            consistency: { type: Type.NUMBER, description: "Ratio from 0 to 1" },
+            piiRisk: { type: Type.STRING, enum: ['None', 'Low', 'Medium', 'High'] },
+            overallScore: { type: Type.NUMBER, description: "Integer from 0 to 100" }
+        },
+        required: ["completeness", "accuracy", "consistency", "piiRisk", "overallScore"]
+    };
+
+    try {
+        const response = await ai.models.generateContent({
+            model: model,
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: responseSchema,
+            },
+        });
+        return JSON.parse(response.text) as DataHealthScore;
+    } catch (error) {
+        console.error("Error in evaluateDataQuality:", error);
+        return { completeness: 0, accuracy: 0, consistency: 0, piiRisk: 'None', overallScore: 0 };
+    }
+};
+
 
 /**
  * Uses Gemini to suggest optimizations for the data schema (columns).
@@ -189,7 +283,8 @@ export const suggestAnalyses = async (csvContent: string): Promise<AnalysisSugge
           *   **name**: The name of the analysis.
           *   **description**: What insights it might reveal.
           *   **type**: The general category (e.g., "Descriptive", "Inferential", "Relational").
-          *   **orangeInstructions**: A concise, step-by-step guide to setting up the workflow for this analysis in "Orange Data Mining" software. Be specific about which widgets to use (e.g., "File -> Select Columns -> Scatter Plot").
+          *   **orangeInstructions**: A concise summary of the workflow.
+          *   **stepByStepInstructions**: A detailed, "Wiki style" array of steps to obtain the report. Be extremely specific about paths, widgets, and settings (e.g., ["1. Open the 'File' widget and load the data.", "2. Connect 'File' to 'Select Columns'...", "3. In 'Select Columns', move 'Value' to 'Target'...", "4. Connect to 'Box Plot' to visualize..."]).
       4.  Ensure your suggestions are practical and commonly used.
       5.  Return ONLY the JSON array of suggestions.
 
@@ -218,10 +313,15 @@ export const suggestAnalyses = async (csvContent: string): Promise<AnalysisSugge
             },
             orangeInstructions: {
               type: Type.STRING,
-              description: "Step-by-step instructions for performing this analysis in Orange Data Mining."
+              description: "A short summary of the workflow in Orange Data Mining."
+            },
+            stepByStepInstructions: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: "Detailed Wiki-style step-by-step instructions for the Orange workflow."
             }
           },
-          required: ["name", "description", "type", "orangeInstructions"]
+          required: ["name", "description", "type", "orangeInstructions", "stepByStepInstructions"]
         }
       };
       

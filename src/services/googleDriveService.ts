@@ -15,18 +15,27 @@ const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/res
 let tokenClient: any;
 let gapiInited = false;
 let gisInited = false;
+let initPromise: Promise<void> | null = null;
 
 export const isGoogleConfigured = (): boolean => {
     return !!CLIENT_ID && !!API_KEY;
 };
 
 export const initGoogleDrive = async (): Promise<void> => {
-    if (!isGoogleConfigured()) {
-        console.warn("Google Drive Integration skipped: Missing GOOGLE_CLIENT_ID or GOOGLE_API_KEY.");
-        return;
+    if (gapiInited && gisInited) {
+        return Promise.resolve();
     }
 
-    return new Promise((resolve) => {
+    if (initPromise) {
+        return initPromise;
+    }
+
+    if (!isGoogleConfigured()) {
+        console.warn("Google Drive Integration skipped: Missing GOOGLE_CLIENT_ID or GOOGLE_API_KEY.");
+        return Promise.resolve();
+    }
+
+    initPromise = new Promise((resolve) => {
         gapi.load('client:picker', async () => {
             await gapi.client.init({
                 apiKey: API_KEY,
@@ -50,6 +59,8 @@ export const initGoogleDrive = async (): Promise<void> => {
             }
         }
     });
+
+    return initPromise;
 };
 
 const getToken = async (): Promise<string> => {

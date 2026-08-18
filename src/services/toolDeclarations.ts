@@ -120,6 +120,37 @@ export const dataCleaningTools: FunctionDeclaration[] = [
     }
   },
   {
+    name: 'semantic_clean_column',
+    description: 'Uses an LLM to identify and fix semantic inconsistencies in a column (e.g., merging "NYC" and "New York", fixing common typos that regex can\'t catch).',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        columnName: {
+          type: Type.STRING,
+          description: 'The header name of the column to semantically clean.'
+        },
+        instruction: {
+          type: Type.STRING,
+          description: 'A brief instruction for the cleanup (e.g., "Standardize US state abbreviations to full names").'
+        }
+      },
+      required: ['columnName', 'instruction']
+    }
+  },
+  {
+    name: 'mask_sensitive_pii',
+    description: 'Identifies and masks Personally Identifiable Information (PII) like full names, emails, or phone numbers in a specific column or the entire dataset.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        columnName: {
+          type: Type.STRING,
+          description: 'The header name of the column to mask. If omitted, the AI will attempt to find and mask all sensitive columns.'
+        }
+      }
+    }
+  },
+  {
     name: 'provide_cleaning_summary',
     description: 'Provides a human-readable summary of the cleaning plan. This function must be called exactly once after all other cleaning tools have been called.',
     parameters: {

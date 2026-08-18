@@ -10,16 +10,23 @@ import { FileManager } from '../components/FileManager';
 import { ChatAgent } from '../components/ChatAgent';
 import { LogoIcon } from '../components/icons/LogoIcon';
 import { VariableManager } from '../components/VariableManager';
+import { DataHealthAuditView } from '../components/DataHealthAuditView';
+import { PreFlightCheckView } from '../components/PreFlightCheckView';
+import { runPreFlightChecks, PreFlightIssue } from './services/preFlightCheckService';
+import { generateDataDictionary } from './services/dataDictionaryService';
+import { convertToJsonl } from './services/jsonlExportService';
 import { 
   generateCleaningPlan,
   suggestAnalyses, 
   chatWithDataAgent,
-  suggestVariableOptimizations
+  suggestVariableOptimizations,
+  getSemanticMapping,
+  evaluateDataQuality
 } from './services/geminiService';
 import * as DataCleaner from './services/dataCleaningService';
 import { trackEvent } from './services/analyticsService';
-import * as DriveService from './services/googleDriveService';
-import type { ProcessStep, AnalysisSuggestion, Difficulty, ChatMessage, VariableSuggestion, AnalysisResult } from '../types';
+import { useGoogleDrive } from './hooks/useGoogleDrive';
+import type { ProcessStep, AnalysisSuggestion, Difficulty, ChatMessage, VariableSuggestion, AnalysisResult, DataHealthScore } from '../types';
 import { ProcessStatus } from '../types';
 import { Difficulty as DifficultyEnum } from '../types';
 import { Modal } from '../components/Modal';
@@ -28,6 +35,7 @@ import type { FunctionCall } from '@google/genai';
 const App: React.FC = () => {
   const initialSteps: ProcessStep[] = [
     { name: 'Upload Data', status: ProcessStatus.PENDING, details: 'Waiting for file...' },
+    { name: 'Audit Data Health', status: ProcessStatus.PENDING, details: 'Evaluating quality.' },
     { name: 'Generate Cleaning Plan', status: ProcessStatus.PENDING, details: 'AI will create a plan.' },
     { name: 'Execute Cleaning Plan', status: ProcessStatus.PENDING, details: 'Locally apply cleaning steps.' },
     { name: 'Process Complete', status: ProcessStatus.PENDING, details: 'Data is prepared for insights.' },
@@ -39,17 +47,20 @@ const App: React.FC = () => {
   const [cleaningSummary, setCleaningSummary] = useState<string[]>([]);
   const [processSteps, setProcessSteps] = useState<ProcessStep[]>(initialSteps);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [isSavingToDrive, setIsSavingToDrive] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [isDone, setIsDone] = useState<boolean>(false);
   const [difficulty, setDifficulty] = useState<Difficulty>(DifficultyEnum.MEDIUM);
   const [progressPercent, setProgressPercent] = useState<number>(0);
   
+  // Data Quality State
+  const [healthScore, setHealthScore] = useState<DataHealthScore | null>(null);
+
   // Variable Optimization State
   const [variableSuggestions, setVariableSuggestions] = useState<VariableSuggestion[]>([]);
   const [isSuggestingVariables, setIsSuggestingVariables] = useState<boolean>(false);
   const [isApplyingVariables, setIsApplyingVariables] = useState<boolean>(false);
   const [hasOptimized, setHasOptimized] = useState<boolean>(false);
+  const [preFlightIssues, setPreFlightIssues] = useState<PreFlightIssue[]>([]);
 
   // Analysis State
   const [analysisSuggestions, setAnalysisSuggestions] = useState<AnalysisSuggestion[]>([]);
@@ -66,20 +77,14 @@ const App: React.FC = () => {
   const [isHelpModalOpen, setIsHelpModalOpen] = useState<boolean>(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState<boolean>(false);
 
-  // Google Drive State
-  const [isDriveReady, setIsDriveReady] = useState<boolean>(false);
-
-  useEffect(() => {
-    const initDrive = async () => {
-        try {
-            await DriveService.initGoogleDrive();
-            setIsDriveReady(DriveService.isGoogleConfigured());
-        } catch (e) {
-            console.error("Failed to initialize Google Drive:", e);
-        }
-    };
-    initDrive();
-  }, []);
+  // Google Drive Hook
+  const {
+    isReady: isDriveReady,
+    isLoading: isDriveLoading,
+    pickFile,
+    saveFile,
+    error: driveError
+  } = useGoogleDrive();
 
   // Effect to clear feedback messages after a delay
   useEffect(() => {
@@ -109,7 +114,6 @@ const App: React.FC = () => {
     setCleaningSummary([]);
     setProcessSteps(initialSteps);
     setIsLoading(false);
-    setIsSavingToDrive(false);
     setError(null);
     setIsDone(false);
     setAnalysisSuggestions([]);
@@ -123,6 +127,7 @@ const App: React.FC = () => {
     setDifficulty(DifficultyEnum.MEDIUM);
     setDriveFeedback(null);
     setProgressPercent(0);
+    setHealthScore(null);
   }, [initialSteps]);
 
   const handleFileChange = (selectedFile: File | null) => {
@@ -169,13 +174,16 @@ const App: React.FC = () => {
       }
       
       try {
-          const { content, name } = await DriveService.pickFileFromDrive();
-          trackEvent('data_source_selected', { source: 'drive' });
-          handleReset();
-          setOriginalData(content);
-          const mockFile = new File([content], name, { type: "text/plain" });
-          setFile(mockFile);
-          updateStepStatus(0, ProcessStatus.COMPLETED, `Imported "${name}" from Google Drive.`);
+          const result = await pickFile();
+          if (result) {
+              const { content, name } = result;
+              trackEvent('data_source_selected', { source: 'drive' });
+              handleReset();
+              setOriginalData(content);
+              const mockFile = new File([content], name, { type: "text/plain" });
+              setFile(mockFile);
+              updateStepStatus(0, ProcessStatus.COMPLETED, `Imported "${name}" from Google Drive.`);
+          }
       } catch (e: any) {
           if (e !== 'Selection cancelled') {
               console.error(e);
@@ -185,37 +193,63 @@ const App: React.FC = () => {
   };
 
   // Maps function names from Gemini to our local functions
-  const toolbelt: { [key: string]: (data: string[][], args: any) => string[][] } = {
-    'trim_whitespace': DataCleaner.trimWhitespace,
-    'remove_duplicate_rows': DataCleaner.removeDuplicateRows,
-    'standardize_capitalization': DataCleaner.standardizeCapitalization,
-    'impute_missing_numeric': DataCleaner.imputeMissingNumeric,
-    'impute_missing_categorical': DataCleaner.imputeMissingCategorical,
-    'discretize_column': DataCleaner.discretizeColumn,
-    'normalize_column': DataCleaner.normalizeColumn,
-    'select_features_by_correlation': DataCleaner.selectFeaturesByCorrelation,
-  };
-
-  const executePlan = (plan: FunctionCall[], data: string[][], onProgress: (message: string) => void): string[][] => {
+  // We'll use an async executor
+  const executePlan = async (plan: FunctionCall[], data: string[][], onProgress: (message: string) => void): Promise<string[][]> => {
     let currentData = data;
     const totalSteps = plan.length;
-    plan.forEach((step, index) => {
-      const tool = toolbelt[step.name];
-      if (tool) {
-        onProgress(`Executing: ${step.name.replace(/_/g, ' ')}... (${index + 1}/${totalSteps})`);
-        try {
-          currentData = tool(currentData, step.args);
-        } catch (e) {
-          console.error(`Error executing tool: ${step.name}`, e);
-          if (e instanceof Error) {
-            throw e;
+    const [headers] = data;
+
+    for (let index = 0; index < plan.length; index++) {
+      const step = plan[index];
+      onProgress(`Executing: ${step.name.replace(/_/g, ' ')}... (${index + 1}/${totalSteps})`);
+
+      try {
+        switch (step.name) {
+          case 'trim_whitespace':
+            currentData = DataCleaner.trimWhitespace(currentData);
+            break;
+          case 'remove_duplicate_rows':
+            currentData = DataCleaner.removeDuplicateRows(currentData);
+            break;
+          case 'standardize_capitalization':
+            currentData = DataCleaner.standardizeCapitalization(currentData, step.args as any);
+            break;
+          case 'impute_missing_numeric':
+            currentData = DataCleaner.imputeMissingNumeric(currentData, step.args as any);
+            break;
+          case 'impute_missing_categorical':
+            currentData = DataCleaner.imputeMissingCategorical(currentData, step.args as any);
+            break;
+          case 'discretize_column':
+            currentData = DataCleaner.discretizeColumn(currentData, step.args as any);
+            break;
+          case 'normalize_column':
+            currentData = DataCleaner.normalizeColumn(currentData, step.args as any);
+            break;
+          case 'select_features_by_correlation':
+            currentData = DataCleaner.selectFeaturesByCorrelation(currentData, step.args as any);
+            break;
+          case 'semantic_clean_column': {
+            const { columnName, instruction } = step.args as { columnName: string; instruction: string };
+            const colIndex = headers.findIndex(h => h.trim().toLowerCase() === columnName.toLowerCase());
+            if (colIndex !== -1) {
+              const uniqueValues = Array.from(new Set(currentData.slice(1).map(r => r[colIndex]))).slice(0, 50);
+              const mappings = await getSemanticMapping(columnName, instruction, uniqueValues);
+              currentData = DataCleaner.semanticMapColumn(currentData, { columnName, mappings });
+            }
+            break;
           }
-          throw new Error(`An unknown error occurred during local execution of "${step.name}".`);
+          case 'mask_sensitive_pii':
+            currentData = DataCleaner.maskSensitivePII(currentData, step.args as any);
+            break;
+          default:
+            console.warn(`Unknown tool in plan: ${step.name}`);
         }
-      } else {
-        console.warn(`Unknown tool in plan: ${step.name}`);
+      } catch (e) {
+        console.error(`Error executing tool: ${step.name}`, e);
+        throw new Error(`Execution error in "${step.name}": ${e instanceof Error ? e.message : 'Unknown'}`);
       }
-    });
+    }
     return currentData;
   };
 
@@ -244,31 +278,42 @@ const App: React.FC = () => {
     trackEvent('cleanup_started', { difficulty });
 
     try {
-      // Step 1: Generate Cleaning Plan
-      updateStepStatus(1, ProcessStatus.IN_PROGRESS, `Gemini is creating a cleaning plan (${difficulty} level)...`);
-      setProgressPercent(25);
+      // Step 1: Audit Data Health
+      updateStepStatus(1, ProcessStatus.IN_PROGRESS, 'Auditing data health and quality...');
+      setProgressPercent(10);
+      const qualityScore = await evaluateDataQuality(originalData);
+      setHealthScore(qualityScore);
+      updateStepStatus(1, ProcessStatus.COMPLETED, `Audit complete. Score: ${qualityScore.overallScore}/100`);
+      setProgressPercent(20);
+
+      // Step 2: Generate Cleaning Plan
+      updateStepStatus(2, ProcessStatus.IN_PROGRESS, `Gemini is creating a cleaning plan (${difficulty} level)...`);
       const { plan, summary } = await generateCleaningPlan(originalData, difficulty);
       setCleaningSummary(summary);
-      updateStepStatus(1, ProcessStatus.COMPLETED, 'AI cleaning plan generated.');
-      setProgressPercent(50);
+      updateStepStatus(2, ProcessStatus.COMPLETED, 'AI cleaning plan generated.');
+      setProgressPercent(40);
       await new Promise(resolve => setTimeout(resolve, 300));
 
-      // Step 2: Execute Cleaning Plan Locally
-      updateStepStatus(2, ProcessStatus.IN_PROGRESS, 'Applying cleaning steps locally...');
+      // Step 3: Execute Cleaning Plan Locally
+      updateStepStatus(3, ProcessStatus.IN_PROGRESS, 'Applying cleaning steps locally...');
       
       const parsedData = DataCleaner.parseCSV(originalData);
-      const cleanedParsedData = executePlan(plan, parsedData, (message) => {
-        updateStepStatus(2, ProcessStatus.IN_PROGRESS, message);
+      const cleanedParsedData = await executePlan(plan, parsedData, (message) => {
+        updateStepStatus(3, ProcessStatus.IN_PROGRESS, message);
       });
       const finalCsv = DataCleaner.serializeCSV(cleanedParsedData);
 
       setCleanedData(finalCsv);
-      updateStepStatus(2, ProcessStatus.COMPLETED, 'Local data cleaning finished.');
+
+      const parsedCleaned = DataCleaner.parseCSV(finalCsv);
+      setPreFlightIssues(runPreFlightChecks(parsedCleaned));
+
+      updateStepStatus(3, ProcessStatus.COMPLETED, 'Local data cleaning finished.');
       setProgressPercent(100);
       await new Promise(resolve => setTimeout(resolve, 300));
       
-      // Step 3: Complete
-      updateStepStatus(3, ProcessStatus.COMPLETED, 'Data is ready for download or further analysis.');
+      // Step 4: Complete
+      updateStepStatus(4, ProcessStatus.COMPLETED, 'Data is ready for download or further analysis.');
       setIsDone(true);
 
     } catch (e) {
@@ -301,6 +346,53 @@ const App: React.FC = () => {
     document.body.removeChild(link);
   };
 
+  const handleDownloadJsonl = () => {
+    if (!cleanedData) return;
+    const jsonlData = convertToJsonl(DataCleaner.parseCSV(cleanedData));
+    const blob = new Blob([jsonlData], { type: 'application/jsonl+json;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    const originalFilename = file?.name.split('.').slice(0, -1).join('.') || 'data';
+    link.setAttribute('download', `${originalFilename}_ai_finetune.jsonl`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleDownloadDict = () => {
+    if (!cleanedData) return;
+    const dictData = generateDataDictionary(DataCleaner.parseCSV(cleanedData));
+    const blob = new Blob([dictData], { type: 'text/markdown;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    const originalFilename = file?.name.split('.').slice(0, -1).join('.') || 'data';
+    link.setAttribute('download', `${originalFilename}_data_dictionary.md`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleDownloadOrange = () => {
+    if (!cleanedData) return;
+    const parsed = DataCleaner.parseCSV(cleanedData);
+    const tabContent = DataCleaner.convertToOrangeTab(parsed);
+    const blob = new Blob([tabContent], { type: 'text/tab-separated-values;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    const originalFilename = file?.name.split('.').slice(0, -1).join('.') || 'data';
+    link.setAttribute('download', `${originalFilename}_orange.tab`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    trackEvent('download_orange', { filename: originalFilename });
+  };
+
   const handleSaveToDrive = async () => {
     if (!cleanedData) return;
     if (!isDriveReady) {
@@ -308,7 +400,6 @@ const App: React.FC = () => {
         return;
     }
 
-    setIsSavingToDrive(true);
     setError(null);
     setDriveFeedback({ message: "Authenticating and uploading to Google Drive...", type: 'info' });
 
@@ -316,7 +407,7 @@ const App: React.FC = () => {
       const originalFilename = file?.name.split('.').slice(0, -1).join('.') || 'data';
       const fileName = `${originalFilename}${hasOptimized ? '_optimized' : ''}_cleaned.csv`;
       
-      await DriveService.saveFileToDrive(cleanedData, fileName);
+      await saveFile(cleanedData, fileName);
       
       trackEvent('data_saved_to_drive');
       setDriveFeedback({ message: `File "${fileName}" saved successfully to your Drive.`, type: 'success' });
@@ -324,8 +415,6 @@ const App: React.FC = () => {
       const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred.';
       setError(`Failed to save to Google Drive: ${errorMessage}`);
       setDriveFeedback(null);
-    } finally {
-      setIsSavingToDrive(false);
     }
   };
 
@@ -357,6 +446,10 @@ const App: React.FC = () => {
     try {
       const updatedCsv = DataCleaner.applyVariableChangesLocally(cleanedData, suggestionsToApply);
       setCleanedData(updatedCsv);
+
+      const parsedCleaned = DataCleaner.parseCSV(updatedCsv);
+      setPreFlightIssues(runPreFlightChecks(parsedCleaned));
+
       setVariableSuggestions([]);
       setHasOptimized(true);
     } catch (e) {
@@ -413,7 +506,7 @@ const App: React.FC = () => {
     }
 };
 
-  const isBusy = isLoading || isSavingToDrive || isSuggestingAnalysis || isChatting || isSuggestingVariables || isApplyingVariables;
+  const isBusy = isLoading || isDriveLoading || isSuggestingAnalysis || isChatting || isSuggestingVariables || isApplyingVariables;
 
   return (
     <div className="min-h-screen bg-brand-gray-900 text-white flex flex-col items-center p-4 sm:p-6 lg:p-8 font-sans">
@@ -442,6 +535,9 @@ const App: React.FC = () => {
               isDone={isDone}
               onStart={handleStartCleanup}
               onDownload={handleDownload}
+              onDownloadOrange={handleDownloadOrange}
+              onDownloadJsonl={handleDownloadJsonl}
+              onDownloadDict={handleDownloadDict}
               onReset={handleReset}
               hasOptimized={hasOptimized}
             />
@@ -452,6 +548,11 @@ const App: React.FC = () => {
               </div>
             )}
              <StatusTracker steps={processSteps} progress={progressPercent} isLoading={isLoading} />
+
+             {/* AI Health Audit View */}
+             {healthScore && <DataHealthAuditView score={healthScore} />}
+
+             {isDone && <PreFlightCheckView issues={preFlightIssues} />}
           </div>
           <div className="flex flex-col space-y-6">
             {isDone ? (
@@ -462,7 +563,7 @@ const App: React.FC = () => {
                         cleanedData={cleanedData}
                         cleaningSummary={cleaningSummary}
                         onSaveToDrive={handleSaveToDrive}
-                        isSavingToDrive={isSavingToDrive}
+                        isSavingToDrive={isDriveLoading}
                         driveFeedback={driveFeedback}
                         hasOptimized={hasOptimized}
                     />

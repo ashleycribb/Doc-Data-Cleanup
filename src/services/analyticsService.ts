@@ -72,6 +72,7 @@ type EventName =
   | 'cleanup_started'
   | 'cleanup_completed'
   | 'data_downloaded'
+  | 'download_orange'
   | 'data_saved_to_drive'
   | 'variable_suggestions_generated'
   | 'variable_changes_applied'
